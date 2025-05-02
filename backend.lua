@@ -2,9 +2,20 @@ local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
 
 local SERVER = "https://jn5t96-3000.csb.app"
-local lastScriptHash = nil
+local knownInstances = {}
+local lastProps = {}
 
--- Main Roblox services
+local httpRequest = (syn and syn.request)
+	or (http and http.request)
+	or (fluxus and fluxus.request)
+	or request
+	or http_request
+
+if not httpRequest then
+	warn("❌ No supported HTTP request method found.")
+	return
+end
+
 local mainServices = {
 	"Workspace", "Players", "Lighting", "ReplicatedStorage", "ReplicatedFirst",
 	"ServerScriptService", "ServerStorage", "StarterGui", "StarterPack", "StarterPlayer",
@@ -12,7 +23,6 @@ local mainServices = {
 	"ScriptContext", "HttpService"
 }
 
--- Supported properties
 local propertyNames = {
 	"Name", "ClassName", "Position", "Orientation", "Rotation", "CFrame",
 	"Size", "Anchored", "CanCollide", "Transparency", "BrickColor", "Material",
@@ -27,7 +37,6 @@ local propertyNames = {
 	"AnchorPoint", "SizeConstraint", "LayoutOrder",
 }
 
--- Convert to JSON-safe format
 local function formatValue(val)
 	local t = typeof(val)
 	if t == "Color3" then
@@ -49,12 +58,19 @@ local function formatValue(val)
 	return nil
 end
 
+local function getInstancePath(inst)
+	local path = {}
+	while inst and inst ~= game do
+		table.insert(path, 1, inst.Name)
+		inst = inst.Parent
+	end
+	return path
+end
+
 local function getProperties(inst)
 	local props = {}
 	for _, prop in ipairs(propertyNames) do
-		local ok, val = pcall(function()
-			return inst[prop]
-		end)
+		local ok, val = pcall(function() return inst[prop] end)
 		if ok and val ~= nil then
 			local safe = formatValue(val)
 			if safe ~= nil then
@@ -65,118 +81,96 @@ local function getProperties(inst)
 	return props
 end
 
-local function safeSerialize(inst)
-	local props = getProperties(inst)
-	props.Name = inst.Name
-	props.ClassName = inst.ClassName
-	props.Children = {}
-	return props
+local function deepEqual(a, b)
+	if typeof(a) ~= typeof(b) then return false end
+	if typeof(a) ~= "table" then return a == b end
+	for k, v in pairs(a) do
+		if not deepEqual(v, b[k]) then return false end
+	end
+	for k in pairs(b) do
+		if a[k] == nil then return false end
+	end
+	return true
 end
 
--- Coroutine-based lightweight serializer
-local function serializeSlowly(instances, onComplete)
-	local tree = {
-		Name = "game",
-		ClassName = "DataModel",
-		Children = {},
-	}
-	local queue = {}
+local function watchInstance(inst)
+	if not inst:IsDescendantOf(game) then return end
+	if knownInstances[inst] then return end
+	knownInstances[inst] = true
+	lastProps[inst] = getProperties(inst)
 
-	for _, service in ipairs(instances) do
-		local node = safeSerialize(service)
-		table.insert(tree.Children, node)
-		table.insert(queue, { instance = service, node = node })
+	inst.AncestryChanged:Connect(function()
+		if not inst:IsDescendantOf(game) then
+			knownInstances[inst] = nil
+			lastProps[inst] = nil
+		end
+	end)
+
+	for _, child in ipairs(inst:GetChildren()) do
+		watchInstance(child)
 	end
 
-	coroutine.wrap(function()
-		while #queue > 0 do
-			for _ = 1, 10 do
-				local entry = table.remove(queue, 1)
-				if not entry then break end
-				local ok, children = pcall(function()
-					return entry.instance:GetChildren()
-				end)
-				if ok then
-					for _, child in ipairs(children) do
-						local childNode = safeSerialize(child)
-						table.insert(entry.node.Children, childNode)
-						table.insert(queue, { instance = child, node = childNode })
-					end
-				end
-			end
-			task.wait()
-		end
-		onComplete(tree)
-	end)()
+	inst.ChildAdded:Connect(watchInstance)
 end
 
--- Send to server manually
-local function sendDex()
-	local services = {}
+local function scanServices()
 	for _, name in ipairs(mainServices) do
 		local ok, service = pcall(function()
 			return game:GetService(name)
 		end)
 		if ok and service then
-			table.insert(services, service)
+			watchInstance(service)
 		end
 	end
-
-	serializeSlowly(services, function(tree)
-		local success, res = pcall(function()
-			return request({
-				Url = SERVER .. "/dex",
-				Method = "POST",
-				Headers = { ["Content-Type"] = "application/json" },
-				Body = HttpService:JSONEncode(tree)
-			})
-		end)
-		if not success or not res.Success then
-			warn("[Dex] Upload failed:", res and res.StatusMessage or "unknown")
-		end
-	end)
 end
 
--- Script execution polling
-local function checkScript()
-	local success, res = pcall(function()
-		return request({
-			Url = SERVER .. "/latest",
-			Method = "GET"
-		})
-	end)
+local function sendChanges()
+	local changes = {}
 
-	if success and res.Success then
-		local content = res.Body
-		local currentHash = HttpService:JSONEncode(content)
-		if currentHash ~= lastScriptHash then
-			lastScriptHash = currentHash
-			local fn, err = loadstring(content)
-			if fn then
-				local ok, execErr = pcall(fn)
-				if not ok then
-					warn("[Script] Runtime error:", execErr)
+	for inst, last in pairs(lastProps) do
+		if inst and inst:IsDescendantOf(game) then
+			local current = getProperties(inst)
+			local diff = {}
+			local changed = false
+			for k, v in pairs(current) do
+				if not deepEqual(v, last[k]) then
+					diff[k] = v
+					changed = true
 				end
-			else
-				warn("[Script] Load error:", err)
+			end
+			if changed then
+				lastProps[inst] = current
+				table.insert(changes, {
+					path = getInstancePath(inst),
+					properties = diff
+				})
 			end
 		end
-	else
-		warn("[Script] Failed to get latest.lua:", res.StatusMessage)
+	end
+
+	if #changes > 0 then
+		pcall(function()
+			httpRequest({
+				Url = SERVER .. "/dex_changes",
+				Method = "POST",
+				Headers = { ["Content-Type"] = "application/json" },
+				Body = HttpService:JSONEncode(changes)
+			})
+		end)
 	end
 end
 
--- Create movable GUI for Dex update
+-- GUI to force refresh
 local function createGui()
 	local gui = Instance.new("ScreenGui")
-	gui.Name = "DexSendGui"
+	gui.Name = "DexLiveGui"
 	gui.ResetOnSpawn = false
 	gui.Parent = CoreGui
 
 	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(0, 180, 0, 40)
+	btn.Size = UDim2.new(0, 160, 0, 40)
 	btn.Position = UDim2.new(0, 20, 0, 100)
-	btn.Text = "Send Game Data"
+	btn.Text = "Dex Live ON"
 	btn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 	btn.TextColor3 = Color3.new(1, 1, 1)
 	btn.BorderSizePixel = 0
@@ -184,35 +178,17 @@ local function createGui()
 	btn.Active = true
 	btn.Draggable = true
 
-	-- Mobile drag support
-	local dragging = false
-	local offset
-	btn.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.Touch then
-			dragging = true
-			offset = input.Position - btn.AbsolutePosition
-		end
+	btn.MouseButton1Click:Connect(function()
+		scanServices()
 	end)
-	btn.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.Touch then
-			dragging = false
-		end
-	end)
-	btn.InputChanged:Connect(function(input)
-		if dragging and input.UserInputType == Enum.UserInputType.Touch then
-			local newPos = input.Position - offset
-			btn.Position = UDim2.new(0, newPos.X, 0, newPos.Y)
-		end
-	end)
-
-	btn.MouseButton1Click:Connect(sendDex)
 end
 
--- Initialize
+-- Start everything
 createGui()
+scanServices()
 task.spawn(function()
 	while true do
-		checkScript()
-		task.wait(3)
+		sendChanges()
+		task.wait(2)
 	end
 end)
