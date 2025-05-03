@@ -8,7 +8,7 @@ local lastScriptHash = nil
 local function checkScript()
 	local success, res = pcall(function()
 		return request({
-			Url = SERVER .. "/latest",
+			Url = SERVER .. "/latest.lua",
 			Method = "GET"
 		})
 	end)
