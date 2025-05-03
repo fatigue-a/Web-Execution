@@ -48,20 +48,36 @@ local function serializeChildren(inst)
     return children
 end
 
--- Get visible paths from server
-local function getVisiblePaths()
-    local success, res = pcall(function()
-        return HttpService:GetAsync(SERVER .. "/visible_paths")
-    end)
+-- Try each method for making an HTTP request
+local httpRequest = (syn and syn.request)
+    or (http and http.request)
+    or (fluxus and fluxus.request)
+    or request
+    or http_request
 
-    if success then
-        return HttpService:JSONDecode(res)
+if not httpRequest then
+    warn("❌ No supported HTTP request method found.")
+    return
+end
+
+-- Get visible paths
+local function getVisiblePaths()
+    local res = pcall(function()
+        return httpRequest({
+            Url = SERVER .. "/visible_paths",
+            Method = "GET",
+            Headers = {["Content-Type"] = "application/json"}
+        })
+    end)
+    
+    if res then
+        return HttpService:JSONDecode(res.Body)
     else
         return {}
     end
 end
 
--- Push property updates to server
+-- Push property updates
 local function syncVisibleProperties()
     local paths = getVisiblePaths()
     local updates = {}
@@ -78,18 +94,27 @@ local function syncVisibleProperties()
 
     local json = HttpService:JSONEncode(updates)
     pcall(function()
-        HttpService:PostAsync(SERVER .. "/dex_changes", json, Enum.HttpContentType.ApplicationJson)
+        httpRequest({
+            Url = SERVER .. "/dex_changes",
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = json
+        })
     end)
 end
 
--- Check for new script on server
+-- Check for new script
 local function checkScript()
-    local success, res = pcall(function()
-        return HttpService:GetAsync(SERVER .. "/latest")
+    local res = pcall(function()
+        return httpRequest({
+            Url = SERVER .. "/latest",
+            Method = "GET",
+            Headers = {["Content-Type"] = "application/json"}
+        })
     end)
 
-    if success then
-        local content = res
+    if res then
+        local content = res.Body
         local currentHash = HttpService:JSONEncode(content)
 
         if currentHash ~= lastScriptHash then
@@ -105,29 +130,38 @@ local function checkScript()
             end
         end
     else
-        warn("[Script] Failed to fetch latest.lua:", res)
+        warn("[Script] Failed to fetch latest.lua:", res.StatusMessage)
     end
 end
 
 -- Handle children request polling from browser
 local function listenForChildRequests()
     RunService.RenderStepped:Connect(function()
-        local success, res = pcall(function()
-            return HttpService:GetAsync(SERVER .. "/dex_children_poll")
+        local res = pcall(function()
+            return httpRequest({
+                Url = SERVER .. "/dex_children_poll",
+                Method = "GET",
+                Headers = {["Content-Type"] = "application/json"}
+            })
         end)
 
-        if success and res ~= "" then
-            local decoded = HttpService:JSONDecode(res)
-            if typeof(decoded) == "string" then
+        if res and res.Body and res.Body ~= "" then
+            local decoded = HttpService:JSONDecode(res.Body)
+            if type(decoded) == "string" then
                 local path = decoded
                 local instance = game:FindFirstChild(path:sub(6), true)
                 if instance then
                     local children = serializeChildren(instance)
                     pcall(function()
-                        HttpService:PostAsync(SERVER .. "/dex_children", HttpService:JSONEncode({
-                            path = path,
-                            children = children
-                        }), Enum.HttpContentType.ApplicationJson)
+                        httpRequest({
+                            Url = SERVER .. "/dex_children",
+                            Method = "POST",
+                            Headers = {["Content-Type"] = "application/json"},
+                            Body = HttpService:JSONEncode({
+                                path = path,
+                                children = children
+                            })
+                        })
                     end)
                 end
             end
@@ -135,7 +169,7 @@ local function listenForChildRequests()
     end)
 end
 
--- Main loop: sync properties and script updates
+-- Main loop: sync props + script updates
 task.spawn(function()
     while true do
         checkScript()
