@@ -62,7 +62,7 @@ end
 
 -- Get visible paths
 local function getVisiblePaths()
-    local res = pcall(function()
+    local res, err = pcall(function()
         return httpRequest({
             Url = SERVER .. "/visible_paths",
             Method = "GET",
@@ -70,9 +70,10 @@ local function getVisiblePaths()
         })
     end)
     
-    if res then
-        return HttpService:JSONDecode(res.Body)
+    if res and err and err.Body then
+        return HttpService:JSONDecode(err.Body)
     else
+        warn("[Error] Failed to get visible paths:", err)
         return {}
     end
 end
@@ -105,7 +106,7 @@ end
 
 -- Check for new script
 local function checkScript()
-    local res = pcall(function()
+    local res, err = pcall(function()
         return httpRequest({
             Url = SERVER .. "/latest",
             Method = "GET",
@@ -113,8 +114,8 @@ local function checkScript()
         })
     end)
 
-    if res then
-        local content = res.Body
+    if res and err then
+        local content = err.Body
         local currentHash = HttpService:JSONEncode(content)
 
         if currentHash ~= lastScriptHash then
@@ -130,14 +131,14 @@ local function checkScript()
             end
         end
     else
-        warn("[Script] Failed to fetch latest.lua:", res.StatusMessage)
+        warn("[Script] Failed to fetch latest.lua:", err)
     end
 end
 
 -- Handle children request polling from browser
 local function listenForChildRequests()
     RunService.RenderStepped:Connect(function()
-        local res = pcall(function()
+        local res, err = pcall(function()
             return httpRequest({
                 Url = SERVER .. "/dex_children_poll",
                 Method = "GET",
@@ -145,8 +146,8 @@ local function listenForChildRequests()
             })
         end)
 
-        if res and res.Body and res.Body ~= "" then
-            local decoded = HttpService:JSONDecode(res.Body)
+        if res and err and err.Body and err.Body ~= "" then
+            local decoded = HttpService:JSONDecode(err.Body)
             if type(decoded) == "string" then
                 local path = decoded
                 local instance = game:FindFirstChild(path:sub(6), true)
@@ -165,6 +166,8 @@ local function listenForChildRequests()
                     end)
                 end
             end
+        else
+            warn("[Error] Failed to poll for children:", err)
         end
     end)
 end
