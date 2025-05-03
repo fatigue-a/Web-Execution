@@ -88,8 +88,12 @@ local function checkScript()
     end)
 
     if res then
-        -- Now `err` should contain the raw script content directly
+        -- Debugging: Check the response content
+        print("Response body: " .. tostring(err.Body))  -- Add this line to debug
         local currentScriptContent = err.Body  -- This is the raw script content
+
+        -- Debugging: Print current script content
+        print("Current script content: " .. currentScriptContent)
 
         -- Check if the script content is different from the last executed one
         if currentScriptContent ~= lastExecutedScriptContent then
@@ -108,6 +112,7 @@ local function checkScript()
             print("No new script to execute.")
         end
     else
+        -- If there's an error in the request, print it for debugging
         warn("[Script] Failed to fetch latest.lua:", err)
     end
 end
