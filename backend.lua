@@ -81,15 +81,15 @@ end
 local function checkScript()
     local res, err = pcall(function()
         return httpRequest({
-            Url = SERVER .. "/latest",  -- Fetch the latest script content
+            Url = SERVER .. "/latest",  -- Fetch the latest script content (raw script)
             Method = "GET",
             Headers = {["Content-Type"] = "application/json"}
         })
     end)
 
-    if res and err then
-        local response = HttpService:JSONDecode(err.Body)
-        local currentScriptContent = response.scriptContent  -- Get the script content from the response
+    if res then
+        -- Now `err` should contain the raw script content directly
+        local currentScriptContent = err.Body  -- This is the raw script content
 
         -- Check if the script content is different from the last executed one
         if currentScriptContent ~= lastExecutedScriptContent then
