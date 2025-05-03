@@ -2,7 +2,7 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local SERVER = "https://jn5t96-3000.csb.app"
-local lastScriptHash = nil
+local lastExecutedScript = nil  -- Keep track of the last executed script
 
 -- Utility: Serialize instance properties
 local function serializeProperties(inst)
@@ -77,28 +77,26 @@ if not httpRequest then
     return
 end
 
--- Generate script hash for comparison
-local function getScriptHash(content)
-    return HttpService:GenerateGUID(false, content)  -- Using GUID as a hash (you can use other hash methods if needed)
-end
-
--- Check for new script
+-- Check for new script by comparing script filename or identifier
 local function checkScript()
     local res, err = pcall(function()
         return httpRequest({
-            Url = SERVER .. "/latest",
+            Url = SERVER .. "/latest",  -- Fetch the latest script info (e.g., script name or ID)
             Method = "GET",
             Headers = {["Content-Type"] = "application/json"}
         })
     end)
 
     if res and err then
-        local content = err.Body
-        local currentHash = getScriptHash(content)
+        local response = HttpService:JSONDecode(err.Body)
+        local currentScriptName = response.scriptName  -- Assuming server returns a script name
 
-        if currentHash ~= lastScriptHash then
-            lastScriptHash = currentHash
-            local fn, err = loadstring(content)
+        -- Check if the script is different from the last executed one
+        if currentScriptName ~= lastExecutedScript then
+            lastExecutedScript = currentScriptName  -- Update the last executed script name
+
+            local scriptContent = response.scriptContent  -- Assuming server sends the script content
+            local fn, err = loadstring(scriptContent)
             if fn then
                 local ok, execErr = pcall(fn)
                 if not ok then
@@ -107,6 +105,8 @@ local function checkScript()
             else
                 warn("[Script] Load error:", err)
             end
+        else
+            print("No new script to execute.")
         end
     else
         warn("[Script] Failed to fetch latest.lua:", err)
@@ -116,8 +116,8 @@ end
 -- Main loop: sync props + script updates
 task.spawn(function()
     while true do
-        checkScript()
-        task.wait(3)
+        checkScript()  -- Check for new script
+        task.wait(3)   -- Adjust the polling interval as needed
     end
 end)
 
