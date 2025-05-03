@@ -2,7 +2,7 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local SERVER = "https://jn5t96-3000.csb.app"
-local lastExecutedScript = nil  -- Keep track of the last executed script
+local lastExecutedScriptContent = nil  -- Keep track of the last executed script content
 
 -- Utility: Serialize instance properties
 local function serializeProperties(inst)
@@ -77,11 +77,11 @@ if not httpRequest then
     return
 end
 
--- Check for new script by comparing script filename or identifier
+-- Check for new script by comparing raw script content
 local function checkScript()
     local res, err = pcall(function()
         return httpRequest({
-            Url = SERVER .. "/latest",  -- Fetch the latest script info (e.g., script name or ID)
+            Url = SERVER .. "/latest",  -- Fetch the latest script content
             Method = "GET",
             Headers = {["Content-Type"] = "application/json"}
         })
@@ -89,14 +89,13 @@ local function checkScript()
 
     if res and err then
         local response = HttpService:JSONDecode(err.Body)
-        local currentScriptName = response.scriptName  -- Assuming server returns a script name
+        local currentScriptContent = response.scriptContent  -- Get the script content from the response
 
-        -- Check if the script is different from the last executed one
-        if currentScriptName ~= lastExecutedScript then
-            lastExecutedScript = currentScriptName  -- Update the last executed script name
+        -- Check if the script content is different from the last executed one
+        if currentScriptContent ~= lastExecutedScriptContent then
+            lastExecutedScriptContent = currentScriptContent  -- Update the last executed script content
 
-            local scriptContent = response.scriptContent  -- Assuming server sends the script content
-            local fn, err = loadstring(scriptContent)
+            local fn, err = loadstring(currentScriptContent)  -- Load the new script content
             if fn then
                 local ok, execErr = pcall(fn)
                 if not ok then
