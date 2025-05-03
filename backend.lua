@@ -164,8 +164,9 @@ local function checkScript()
     end
 end
 
+-- Handle children request polling from browser
 local lastPollTime = 0
-local pollInterval = 5
+local pollInterval = 5  -- Adjust this for a reasonable delay in polling (in seconds)
 
 local function listenForChildRequests()
     RunService.RenderStepped:Connect(function()
@@ -179,25 +180,36 @@ local function listenForChildRequests()
                 })
             end)
 
-            if res and err and err.Body and err.Body ~= "" then
-                local decoded = HttpService:JSONDecode(err.Body)
-                if type(decoded) == "string" then
-                    local path = decoded
-                    local instance = game:FindFirstChild(path:sub(6), true)
-                    if instance then
-                        local children = serializeChildren(instance)
-                        pcall(function()
-                            httpRequest({
-                                Url = SERVER .. "/dex_children",
-                                Method = "POST",
-                                Headers = {["Content-Type"] = "application/json"},
-                                Body = HttpService:JSONEncode({
-                                    path = path,
-                                    children = children
-                                })
-                            })
-                        end)
+            if res then
+                -- Check if the response body is not empty
+                if err and err.Body and err.Body ~= "" then
+                    local decoded, decodeErr = pcall(function() return HttpService:JSONDecode(err.Body) end)
+                    if decoded then
+                        if type(decoded) == "string" then
+                            local path = decoded
+                            local instance = game:FindFirstChild(path:sub(6), true)
+                            if instance then
+                                local children = serializeChildren(instance)
+                                pcall(function()
+                                    httpRequest({
+                                        Url = SERVER .. "/dex_children",
+                                        Method = "POST",
+                                        Headers = {["Content-Type"] = "application/json"},
+                                        Body = HttpService:JSONEncode({
+                                            path = path,
+                                            children = children
+                                        })
+                                    })
+                                end)
+                            end
+                        else
+                            warn("[Error] Unexpected response format from /dex_children_poll:", err.Body)
+                        end
+                    else
+                        warn("[Error] Failed to decode JSON response:", decodeErr)
                     end
+                else
+                    warn("[Error] Empty or invalid response body:", err.Body)
                 end
             else
                 warn("[Error] Failed to poll for children:", err)
