@@ -1,7 +1,5 @@
 local HttpService = game:GetService("HttpService")
-local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
-
 local LocalPlayer = Players.LocalPlayer
 local SERVER = "https://jn5t96-3000.csb.app"
 local lastScriptHash = nil
@@ -35,17 +33,33 @@ local function serializeProperties(inst)
     return props
 end
 
--- Utility: Serialize children
-local function serializeChildren(inst)
-    local children = {}
-    for _, child in ipairs(inst:GetChildren()) do
-        table.insert(children, {
-            Name = child.Name,
-            ClassName = child.ClassName,
-            _properties = serializeProperties(child)
-        })
+-- Send initial instance data to server
+local function sendInitialInstanceData()
+    local initialInstances = {
+        "Workspace", "Players", "Lighting", "ReplicatedFirst", 
+        "ReplicatedStorage", "StarterGui", "StarterPack", "StarterPlayer", 
+        "SoundService", "Chat", "HttpService", "UserInputService", 
+        "TweenService", "GuiService", "CoreGui"
+    }
+
+    local updates = {}
+
+    for _, path in ipairs(initialInstances) do
+        local instance = game:GetService(path)  -- Using GetService to safely fetch services
+        if instance then
+            updates[path] = serializeProperties(instance)
+        end
     end
-    return children
+
+    local json = HttpService:JSONEncode(updates)
+    pcall(function()
+        httpRequest({
+            Url = SERVER .. "/instance_data",
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = json
+        })
+    end)
 end
 
 -- HTTP Request method selection
@@ -66,79 +80,6 @@ end
 -- Generate script hash for comparison
 local function getScriptHash(content)
     return HttpService:GenerateGUID(false, content)  -- Using GUID as a hash (you can use other hash methods if needed)
-end
-
--- Send the regular instances (e.g., game, Workspace) to the server
-local function sendInitialInstanceData()
-    local initialInstances = {
-        "Workspace", "Players", "Lighting", "ReplicatedFirst", 
-        "ReplicatedStorage", "StarterGui", "StarterPack", "StarterPlayer", 
-        "SoundService", "Chat", "HttpService", "UserInputService", 
-        "TweenService", "GuiService", "CoreGui"
-    }
-
-    local updates = {}
-
-    for _, path in ipairs(initialInstances) do
-        local instance = game:GetService(path)  -- Using GetService to safely fetch services
-        if instance then
-            updates[path] = serializeChildren(instance)
-        end
-    end
-
-    local json = HttpService:JSONEncode(updates)
-    pcall(function()
-        httpRequest({
-            Url = SERVER .. "/dex_children",
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = json
-        })
-    end)
-end
-
--- Get visible paths
-local function getVisiblePaths()
-    local res, err = pcall(function()
-        return httpRequest({
-            Url = SERVER .. "/visible_paths",
-            Method = "GET",
-            Headers = {["Content-Type"] = "application/json"}
-        })
-    end)
-    
-    if res and err and err.Body then
-        return HttpService:JSONDecode(err.Body)
-    else
-        warn("[Error] Failed to get visible paths:", err)
-        return {}
-    end
-end
-
--- Push property updates
-local function syncVisibleProperties()
-    local paths = getVisiblePaths()
-    local updates = {}
-
-    for _, path in ipairs(paths) do
-        local success, inst = pcall(function()
-            return game:FindFirstChild(path:sub(6), true)
-        end)
-
-        if success and inst then
-            updates[path] = serializeProperties(inst)
-        end
-    end
-
-    local json = HttpService:JSONEncode(updates)
-    pcall(function()
-        httpRequest({
-            Url = SERVER .. "/dex_changes",
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = json
-        })
-    end)
 end
 
 -- Check for new script
@@ -172,72 +113,13 @@ local function checkScript()
     end
 end
 
--- Handle children request polling from browser
-local lastPollTime = 0
-local pollInterval = 5  -- Adjust this for a reasonable delay in polling (in seconds)
-
-local function listenForChildRequests()
-    RunService.RenderStepped:Connect(function()
-        local currentTime = tick()
-        if currentTime - lastPollTime >= pollInterval then  -- Only poll at set intervals
-            local res, err = pcall(function()
-                return httpRequest({
-                    Url = SERVER .. "/dex_children_poll",
-                    Method = "GET",
-                    Headers = {["Content-Type"] = "application/json"}
-                })
-            end)
-
-            if res then
-                -- Check if the response body is not empty
-                if err and err.Body and err.Body ~= "" then
-                    local decoded, decodeErr = pcall(function() return HttpService:JSONDecode(err.Body) end)
-                    if decoded then
-                        if type(decoded) == "string" then
-                            local path = decoded
-                            local instance = game:FindFirstChild(path:sub(6), true)
-                            if instance then
-                                local children = serializeChildren(instance)
-                                pcall(function()
-                                    httpRequest({
-                                        Url = SERVER .. "/dex_children",
-                                        Method = "POST",
-                                        Headers = {["Content-Type"] = "application/json"},
-                                        Body = HttpService:JSONEncode({
-                                            path = path,
-                                            children = children
-                                        })
-                                    })
-                                end)
-                            end
-                        else
-                            warn("[Error] Unexpected response format from /dex_children_poll:", err.Body)
-                        end
-                    else
-                        warn("[Error] Failed to decode JSON response:", decodeErr)
-                    end
-                else
-                    warn("[Error] Empty or invalid response body:", err.Body)
-                end
-            else
-                warn("[Error] Failed to poll for children:", err)
-            end
-            lastPollTime = currentTime
-        end
-    end)
-end
-
 -- Main loop: sync props + script updates
 task.spawn(function()
     while true do
         checkScript()
-        syncVisibleProperties()
         task.wait(3)
     end
 end)
-
--- Start lazy loading system
-listenForChildRequests()
 
 -- Send initial instance data (regular instances) when script starts
 sendInitialInstanceData()
