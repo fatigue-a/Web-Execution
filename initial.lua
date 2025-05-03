@@ -1,8 +1,16 @@
 local HttpService = game:GetService("HttpService")
-local Players = game:GetService("Players")
-local Server = "https://jn5t96-3000.csb.app" 
+local httpRequest = (syn and syn.request)
+    or (http and http.request)
+    or (fluxus and fluxus.request)
+    or request
+    or http_request
 
--- Utility function to serialize instance properties
+if not httpRequest then
+    warn("❌ No supported HTTP request method found.")
+    return
+end
+
+-- Utility: Serialize instance properties
 local function serializeProperties(inst)
     local props = {}
     local properties = {
@@ -31,7 +39,7 @@ local function serializeProperties(inst)
     return props
 end
 
--- Utility function to serialize children of an instance
+-- Utility: Serialize children
 local function serializeChildren(inst)
     local children = {}
     for _, child in ipairs(inst:GetChildren()) do
@@ -44,76 +52,34 @@ local function serializeChildren(inst)
     return children
 end
 
--- List of common instances in all Roblox games
-local initialInstances = {
-    "game", "game.Workspace", "game.Players", "game.Lighting", "game.ReplicatedFirst",
-    "game.ReplicatedStorage", "game.StarterGui", "game.StarterPack", "game.StarterPlayer",
-    "game.SoundService", "game.Chat", "game.HttpService", "game.UserInputService", 
-    "game.TweenService", "game.GuiService", "game.CoreGui"
-}
-
--- Function to send initial instance data to the server
+-- Send the regular instances (e.g., Workspace, Players) to the server
 local function sendInitialInstanceData()
+    local initialInstances = {
+        "Workspace", "Players", "Lighting", "ReplicatedFirst",
+        "ReplicatedStorage", "StarterGui", "StarterPack", "StarterPlayer",
+        "SoundService", "Chat", "HttpService", "UserInputService", 
+        "TweenService", "GuiService", "CoreGui"
+    }
     local updates = {}
 
-    -- Collect instance data for each of the initial instances
     for _, path in ipairs(initialInstances) do
         local instance = game:FindFirstChild(path)
         if instance then
             updates[path] = serializeChildren(instance)
-        else
-            warn("Instance not found: " .. path)
         end
     end
 
-    -- Ensure that there is data to send
-    if next(updates) == nil then
-        warn("No data to send. Updates table is empty.")
-        return
-    end
-
-    -- Send the data to the server
+    -- Send initial instance data
     local json = HttpService:JSONEncode(updates)
-    local success, response = pcall(function()
-        return HttpService:RequestAsync({
-            Url = Server .. "/dex_children",
+    pcall(function()
+        httpRequest({
+            Url = "https://jn5t96-3000.csb.app/dex_children",
             Method = "POST",
             Headers = {["Content-Type"] = "application/json"},
             Body = json
         })
     end)
-
-    if success then
-        print("Data sent successfully!")
-    else
-        warn("Failed to send data:", response)
-    end
 end
 
--- Function to save the visible paths to the server
-local function sendVisiblePaths()
-    local paths = {}
-    for _, path in ipairs(initialInstances) do
-        table.insert(paths, path)
-    end
-
-    local json = HttpService:JSONEncode(paths)
-    local success, response = pcall(function()
-        return HttpService:RequestAsync({
-            Url = Server .. "/visible_paths",
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = json
-        })
-    end)
-
-    if success then
-        print("Visible paths sent successfully!")
-    else
-        warn("Failed to send visible paths:", response)
-    end
-end
-
--- Main execution: Send the initial instance data and visible paths
+-- Call the function to populate the initial data
 sendInitialInstanceData()
-sendVisiblePaths()
