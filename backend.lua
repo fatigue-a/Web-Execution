@@ -88,7 +88,7 @@ local function sendServiceData()
 
     local success, res = pcall(function()
         return request({
-            Url = SERVER .. "/service_data",
+            Url = SERVER .. "/instance_data",
             Method = "POST",
             Headers = { ["Content-Type"] = "application/json" },
             Body = HttpService:JSONEncode(servicesData)
