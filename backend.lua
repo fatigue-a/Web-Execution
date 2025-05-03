@@ -60,6 +60,34 @@ if not httpRequest then
     return
 end
 
+local function sendInitialInstanceData()
+    local initialInstances = {
+        "game", "game.Workspace", "game.Players", "game.Lighting", "game.ReplicatedFirst",
+        "game.ReplicatedStorage", "game.StarterGui", "game.StarterPack", "game.StarterPlayer",
+        "game.SoundService", "game.Chat", "game.HttpService", "game.UserInputService", 
+        "game.TweenService", "game.GuiService", "game.CoreGui"
+    }
+    local updates = {}
+
+    for _, path in ipairs(initialInstances) do
+        local instance = game:FindFirstChild(path)
+        if instance then
+            updates[path] = serializeChildren(instance)
+        end
+    end
+
+    -- Send initial instance data
+    local json = HttpService:JSONEncode(updates)
+    pcall(function()
+        httpRequest({
+            Url = SERVER .. "/dex_children",
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = json
+        })
+    end)
+end
+
 -- Get visible paths
 local function getVisiblePaths()
     local res, err = pcall(function()
@@ -183,3 +211,6 @@ end)
 
 -- Start lazy loading system
 listenForChildRequests()
+
+-- Send initial instance data (regular instances) when script starts
+sendInitialInstanceData()
