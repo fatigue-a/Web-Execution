@@ -69,9 +69,12 @@ local function sendInitialInstanceData()
         end
     end
 
-    -- Send initial instance data
+    -- Log the data before sending to confirm it's structured correctly
     local json = HttpService:JSONEncode(updates)
-    pcall(function()
+    print("Sending the following data to the server:", json)  -- Logs the data being sent
+
+    -- Send initial instance data
+    local success, err = pcall(function()
         httpRequest({
             Url = "https://jn5t96-3000.csb.app/dex_children",
             Method = "POST",
@@ -79,6 +82,10 @@ local function sendInitialInstanceData()
             Body = json
         })
     end)
+
+    if not success then
+        warn("❌ Failed to send request:", err)
+    end
 end
 
 -- Call the function to populate the initial data
