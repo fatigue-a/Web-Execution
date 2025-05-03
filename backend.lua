@@ -85,18 +85,25 @@ end
 -- Send the data to the server
 local function sendServiceData()
     local servicesData = gatherServiceData()
+    local jsonData = HttpService:JSONEncode(servicesData)
 
+    -- Debugging log for the data
+    print("[Debug] Sending Data:", jsonData)
+
+    -- Ensure request is available and send data to /instance_data
     local success, res = pcall(function()
         return request({
             Url = SERVER .. "/instance_data",
             Method = "POST",
             Headers = { ["Content-Type"] = "application/json" },
-            Body = HttpService:JSONEncode(servicesData)
+            Body = jsonData
         })
     end)
 
-    if not success or not res.Success then
-        warn("[Service Data] Upload failed:", res and res.StatusMessage or "unknown")
+    if success then
+        print("[Success] Data sent to server.")
+    else
+        warn("[Error] Failed to send data:", res)
     end
 end
 
