@@ -60,13 +60,14 @@ if not httpRequest then
     return
 end
 
+-- Send the regular instances (e.g., game, Workspace) to the server
 local function sendInitialInstanceData()
     local initialInstances = {
         "game", "game.Workspace", "game.Players", "game.Lighting", "game.ReplicatedFirst",
         "game.ReplicatedStorage", "game.StarterGui", "game.StarterPack", "game.StarterPlayer",
         "game.SoundService", "game.Chat", "game.HttpService", "game.UserInputService", 
         "game.TweenService", "game.GuiService", "game.CoreGui"
-    }
+    }  -- List the initial instances you want to send
     local updates = {}
 
     for _, path in ipairs(initialInstances) do
@@ -163,39 +164,45 @@ local function checkScript()
     end
 end
 
--- Handle children request polling from browser
+local lastPollTime = 0
+local pollInterval = 5
+
 local function listenForChildRequests()
     RunService.RenderStepped:Connect(function()
-        local res, err = pcall(function()
-            return httpRequest({
-                Url = SERVER .. "/dex_children_poll",
-                Method = "GET",
-                Headers = {["Content-Type"] = "application/json"}
-            })
-        end)
+        local currentTime = tick()
+        if currentTime - lastPollTime >= pollInterval then  -- Only poll at set intervals
+            local res, err = pcall(function()
+                return httpRequest({
+                    Url = SERVER .. "/dex_children_poll",
+                    Method = "GET",
+                    Headers = {["Content-Type"] = "application/json"}
+                })
+            end)
 
-        if res and err and err.Body and err.Body ~= "" then
-            local decoded = HttpService:JSONDecode(err.Body)
-            if type(decoded) == "string" then
-                local path = decoded
-                local instance = game:FindFirstChild(path:sub(6), true)
-                if instance then
-                    local children = serializeChildren(instance)
-                    pcall(function()
-                        httpRequest({
-                            Url = SERVER .. "/dex_children",
-                            Method = "POST",
-                            Headers = {["Content-Type"] = "application/json"},
-                            Body = HttpService:JSONEncode({
-                                path = path,
-                                children = children
+            if res and err and err.Body and err.Body ~= "" then
+                local decoded = HttpService:JSONDecode(err.Body)
+                if type(decoded) == "string" then
+                    local path = decoded
+                    local instance = game:FindFirstChild(path:sub(6), true)
+                    if instance then
+                        local children = serializeChildren(instance)
+                        pcall(function()
+                            httpRequest({
+                                Url = SERVER .. "/dex_children",
+                                Method = "POST",
+                                Headers = {["Content-Type"] = "application/json"},
+                                Body = HttpService:JSONEncode({
+                                    path = path,
+                                    children = children
+                                })
                             })
-                        })
-                    end)
+                        end)
+                    end
                 end
+            else
+                warn("[Error] Failed to poll for children:", err)
             end
-        else
-            warn("[Error] Failed to poll for children:", err)
+            lastPollTime = currentTime
         end
     end)
 end
