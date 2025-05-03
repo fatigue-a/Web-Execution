@@ -48,36 +48,44 @@ local function serializeChildren(inst)
     return children
 end
 
--- Try each method for making an HTTP request
-local httpRequest = (syn and syn.request)
-    or (http and http.request)
-    or (fluxus and fluxus.request)
-    or request
-    or http_request
+-- HTTP Request method selection
+local HttpRequestMethods = {
+    syn = syn and syn.request,
+    http = http and http.request,
+    fluxus = fluxus and fluxus.request,
+    default = request or http_request
+}
+
+local httpRequest = HttpRequestMethods[syn and "syn" or http and "http" or fluxus and "fluxus" or "default"]
 
 if not httpRequest then
     warn("❌ No supported HTTP request method found.")
     return
 end
 
+-- Generate script hash for comparison
+local function getScriptHash(content)
+    return HttpService:GenerateGUID(false, content)  -- Using GUID as a hash (you can use other hash methods if needed)
+end
+
 -- Send the regular instances (e.g., game, Workspace) to the server
 local function sendInitialInstanceData()
     local initialInstances = {
-        "game", "game.Workspace", "game.Players", "game.Lighting", "game.ReplicatedFirst",
-        "game.ReplicatedStorage", "game.StarterGui", "game.StarterPack", "game.StarterPlayer",
-        "game.SoundService", "game.Chat", "game.HttpService", "game.UserInputService", 
-        "game.TweenService", "game.GuiService", "game.CoreGui"
-    }  -- List the initial instances you want to send
+        "Workspace", "Players", "Lighting", "ReplicatedFirst", 
+        "ReplicatedStorage", "StarterGui", "StarterPack", "StarterPlayer", 
+        "SoundService", "Chat", "HttpService", "UserInputService", 
+        "TweenService", "GuiService", "CoreGui"
+    }
+
     local updates = {}
 
     for _, path in ipairs(initialInstances) do
-        local instance = game:FindFirstChild(path)
+        local instance = game:GetService(path)  -- Using GetService to safely fetch services
         if instance then
             updates[path] = serializeChildren(instance)
         end
     end
 
-    -- Send initial instance data
     local json = HttpService:JSONEncode(updates)
     pcall(function()
         httpRequest({
@@ -145,7 +153,7 @@ local function checkScript()
 
     if res and err then
         local content = err.Body
-        local currentHash = HttpService:JSONEncode(content)
+        local currentHash = getScriptHash(content)
 
         if currentHash ~= lastScriptHash then
             lastScriptHash = currentHash
