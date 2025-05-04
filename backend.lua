@@ -6,10 +6,10 @@ local lastScriptHash = nil
 -- Function to get all remotes in the game
 local function getRemotes()
     local remotes = {}
-    
+
     -- Check for RemoteEvents and RemoteFunctions in ReplicatedStorage
     local replicatedStorage = game:GetService("ReplicatedStorage")
-    
+
     for _, obj in ipairs(replicatedStorage:GetDescendants()) do
         if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
             table.insert(remotes, {
@@ -33,7 +33,7 @@ local function sendRemoteData()
 
     -- Ensure request is available and send data to /remote_data
     local success, res = pcall(function()
-        return request({
+        return HttpService:RequestAsync({
             Url = SERVER .. "/remote_data",
             Method = "POST",
             Headers = { ["Content-Type"] = "application/json" },
@@ -51,15 +51,15 @@ end
 -- Script execution polling
 local function checkScript()
     local success, res = pcall(function()
-        return request({
+        return HttpService:RequestAsync({
             Url = SERVER .. "/latest",
             Method = "GET"
         })
     end)
 
-    if success and res.Success then
+    if success and res.StatusCode == 200 then
         local content = res.Body
-        local currentHash = HttpService:JSONEncode(content)
+        local currentHash = HttpService:GenerateChecksum(content)  -- Generate checksum to track changes
         if currentHash ~= lastScriptHash then
             lastScriptHash = currentHash
             local fn, err = loadstring(content)
