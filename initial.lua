@@ -85,7 +85,6 @@ local function sendToDiscord(remote, method, args)
     })
 end
 
--- hook __namecall
 local oldNamecall
 oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
     local method = getnamecallmethod()
@@ -100,26 +99,4 @@ oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
     return oldNamecall(self, ...)
 end))
 
--- hook direct calls to FireServer / InvokeServer
-local function hookRemoteFunction(funcName)
-    local dummyRemote = Instance.new("RemoteEvent")
-    local raw = getrawmetatable(dummyRemote)
-    local real = raw[funcName]
-    hookfunction(real, function(self, ...)
-        if not checkcaller() and typeof(self) == "Instance" then
-            local args = {...}
-            local method = funcName
-            local key = generateKey(self, method, args)
-            if not sentCache[key] then
-                sentCache[key] = true
-                sendToDiscord(self, method, args)
-            end
-        end
-        return real(self, ...)
-    end)
-end
-
-hookRemoteFunction("FireServer")
-hookRemoteFunction("InvokeServer")
-
-print("[✅ WebHook Spy Running Safely]")
+print("[✅ WebHook Spy Running]")
