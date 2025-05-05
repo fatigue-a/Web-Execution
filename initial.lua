@@ -1,21 +1,40 @@
 local HttpService = game:GetService("HttpService")
+
 local webhookURL = "https://discord.com/api/webhooks/1368740509186527323/M1FD3uiD0S7lYr_XP_h7flGHZfdi8b_gYgveK9p904iO1q380Dxd53nY7CucVdUzclpv"
 
-local function universalRequest(options)
-    local funcs = {syn and syn.request, http_request, request}
-    for _, f in ipairs(funcs) do
-        if type(f) == "function" then
-            return f(options)
-        end
-    end
-    warn("[WebHook Spy] Executor not supported.")
+local HttpRequestMethods = {
+    syn = syn and syn.request,
+    http = http and http.request,
+    fluxus = fluxus and fluxus.request,
+    krnl = request,
+    default = http_request
+}
+
+local httpRequest = HttpRequestMethods[
+    syn and "syn"
+    or http and "http"
+    or fluxus and "fluxus"
+    or request and "krnl"
+    or "default"
+]
+
+if not httpRequest then
+    warn("[❌ RemoteSpy] Executor not compatable.")
+    return
 end
 
+local sentCache = {}
+
+-- Safe argument serialization
 local function safeSerialize(val)
     local ok, result = pcall(function()
         return HttpService:JSONEncode(val)
     end)
-    return ok and result or "\"[unserializable: " .. typeof(val) .. "]\""
+    if ok then
+        return result
+    else
+        return "\"[unserializable: " .. typeof(val) .. "]\""
+    end
 end
 
 local function serializeArgs(args)
@@ -28,6 +47,16 @@ local function serializeArgs(args)
         end
     end
     return parts
+end
+
+local function generateKey(remote, method, args)
+    local serializedArgs = serializeArgs(args)
+    local data = {
+        remote = remote:GetFullName(),
+        method = method,
+        args = serializedArgs
+    }
+    return HttpService:JSONEncode(data)
 end
 
 local function buildCodeSnippet(remote, method, args)
@@ -54,7 +83,7 @@ local function sendToDiscord(remote, method, args)
         }}
     }
 
-    universalRequest({
+    httpRequest({
         Url = webhookURL,
         Method = "POST",
         Headers = {["Content-Type"] = "application/json"},
@@ -62,18 +91,21 @@ local function sendToDiscord(remote, method, args)
     })
 end
 
+-- Hook __namecall safely
 local oldNamecall
 oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-    local method = getnamecallmethod()
-    if not checkcaller() and (method == "FireServer" or method == "InvokeServer") and typeof(self) == "Instance" then
-        local args = {...}
-        task.spawn(function()
-            pcall(function()
+    if not checkcaller() then
+        local method = getnamecallmethod()
+        if (method == "FireServer" or method == "InvokeServer") and typeof(self) == "Instance" then
+            local args = {...}
+            local key = generateKey(self, method, args)
+            if not sentCache[key] then
+                sentCache[key] = true
                 sendToDiscord(self, method, args)
-            end)
-        end)
+            end
+        end
     end
     return oldNamecall(self, ...)
 end))
 
-print("[✅ WebHook Spy Started]")
+print("[✅ Remote Spy Enabled].")
