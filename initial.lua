@@ -47,11 +47,17 @@ local function generateKey(remote, method, args)
 end
 
 local function buildCodeSnippet(remote, method, args)
-    local argsJoined = table.concat(serializeArgs(args), ", ")
-    return `game.{remote:GetFullName()}:{method}({argsJoined})`
+    local parts = {}
+    for _, v in ipairs(args) do
+        if typeof(v) == "Instance" then
+            table.insert(parts, `game.{v:GetFullName()}`)
+        else
+            table.insert(parts, tostring(v))
+        end
+    end
+    return `game.{remote:GetFullName()}:{method}(${table.concat(parts, ", ")})`
 end
 
--- Webhook sender
 local function sendToDiscord(remote, method, args)
     local serializedArgs = table.concat(serializeArgs(args), ",\n")
     local codeSnippet = buildCodeSnippet(remote, method, args)
@@ -79,7 +85,7 @@ local function sendToDiscord(remote, method, args)
     })
 end
 
--- Hook __namecall
+-- hook __namecall
 local oldNamecall
 oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
     local method = getnamecallmethod()
@@ -94,10 +100,11 @@ oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
     return oldNamecall(self, ...)
 end))
 
---  also hooks direct calls to FireServer and InvokeServer (cause why not)
+-- hook direct calls to FireServer / InvokeServer
 local function hookRemoteFunction(funcName)
-    local remote = Instance.new("RemoteEvent")
-    local real = getrawmetatable(remote)[funcName]
+    local dummyRemote = Instance.new("RemoteEvent")
+    local raw = getrawmetatable(dummyRemote)
+    local real = raw[funcName]
     hookfunction(real, function(self, ...)
         if not checkcaller() and typeof(self) == "Instance" then
             local args = {...}
@@ -115,4 +122,4 @@ end
 hookRemoteFunction("FireServer")
 hookRemoteFunction("InvokeServer")
 
-print("[✅ WebHook Spy Start]")
+print("[✅ WebHook Spy Running Safely]")
