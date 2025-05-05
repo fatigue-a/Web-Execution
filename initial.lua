@@ -1,5 +1,5 @@
 local HttpService = game:GetService("HttpService")
-local webhookURL = "https://discord.com/api/webhooks/1368740509186527323/M1FD3uiD0S7lYr_XP_h7flGHZfdi8b_gYgveK9p904iO1q380Dxd53nY7CucVdUzclpv"
+local webhookURL = "https://discord.com/api/webhooks/your_webhook_url"
 
 local function universalRequest(options)
     local funcs = {syn and syn.request, http_request, request}
@@ -8,41 +8,48 @@ local function universalRequest(options)
             return f(options)
         end
     end
+    warn("[WebHook Spy] Executor not supported.")
 end
 
-local function safeSerialize(v)
-    local success, result = pcall(function()
-        return HttpService:JSONEncode(v)
+local function safeSerialize(val)
+    local ok, result = pcall(function()
+        return HttpService:JSONEncode(val)
     end)
-    return success and result or "\"[unserializable: " .. typeof(v) .. "]\""
+    return ok and result or "\"[unserializable: " .. typeof(val) .. "]\""
 end
 
 local function serializeArgs(args)
-    local out = {}
-    for _, arg in ipairs(args) do
-        if typeof(arg) == "Instance" then
-            table.insert(out, `game.{arg:GetFullName()}`)
+    local parts = {}
+    for _, v in ipairs(args) do
+        if typeof(v) == "Instance" then
+            table.insert(parts, "game." .. v:GetFullName())
         else
-            table.insert(out, safeSerialize(arg))
+            table.insert(parts, safeSerialize(v))
         end
     end
-    return out
+    return parts
+end
+
+local function buildCodeSnippet(remote, method, args)
+    local argsJoined = table.concat(serializeArgs(args), ", ")
+    return "game." .. remote:GetFullName() .. ":" .. method .. "(" .. argsJoined .. ")"
 end
 
 local function sendToDiscord(remote, method, args)
-    local fields = {
-        {name = "🔁 Remote", value = "`" .. remote:GetFullName() .. "`", inline = false},
-        {name = "📦 Method", value = "`" .. method .. "`", inline = true},
-        {name = "📨 Arguments", value = "```lua\n" .. table.concat(serializeArgs(args), ",\n") .. "\n```", inline = false},
-        {name = "📋 Code", value = "```lua\ngame." .. remote:GetFullName() .. ":" .. method .. "(" .. table.concat(serializeArgs(args), ", ") .. ")```", inline = false}
-    }
+    local serializedArgs = table.concat(serializeArgs(args), ",\n")
+    local codeSnippet = buildCodeSnippet(remote, method, args)
 
     local payload = {
         username = "Remote Spy",
         embeds = {{
-            title = "📡 Remote Call",
+            title = "📡 Remote Call Detected",
             color = 0x00bfff,
-            fields = fields,
+            fields = {
+                {name = "🔁 Remote", value = "`" .. remote:GetFullName() .. "`", inline = false},
+                {name = "📦 Method", value = "`" .. method .. "`", inline = true},
+                {name = "📨 Arguments", value = "```lua\n" .. serializedArgs .. "\n```", inline = false},
+                {name = "📋 Re-fire Code", value = "```lua\n" .. codeSnippet .. "\n```", inline = false}
+            },
             timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
         }}
     }
@@ -55,21 +62,18 @@ local function sendToDiscord(remote, method, args)
     })
 end
 
--- __namecall hook
-local old
-old = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-    if not checkcaller() then
-        local method = getnamecallmethod()
-        if (method == "FireServer" or method == "InvokeServer") and typeof(self) == "Instance" then
-            local args = {...}
-            task.spawn(function()
-                pcall(function()
-                    sendToDiscord(self, method, args)
-                end)
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+    local method = getnamecallmethod()
+    if not checkcaller() and (method == "FireServer" or method == "InvokeServer") and typeof(self) == "Instance" then
+        local args = {...}
+        task.spawn(function()
+            pcall(function()
+                sendToDiscord(self, method, args)
             end)
-        end
+        end)
     end
-    return old(self, ...)
+    return oldNamecall(self, ...)
 end))
 
-print("[✅ WebHook Spy Enabled]")
+print("[✅ WebHook Spy Started]")
