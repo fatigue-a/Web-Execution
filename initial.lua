@@ -2,7 +2,6 @@ local HttpService = game:GetService("HttpService")
 
 local webhookURL = "https://discord.com/api/webhooks/1368740509186527323/M1FD3uiD0S7lYr_XP_h7flGHZfdi8b_gYgveK9p904iO1q380Dxd53nY7CucVdUzclpv"
 
--- Executor-compatible request
 local HttpRequestMethods = {
     syn = syn and syn.request,
     http = http and http.request,
@@ -20,19 +19,17 @@ local httpRequest = HttpRequestMethods[
 ]
 
 if not httpRequest then
-    warn("[❌ RemoteSpy] Executor not supported")
+    warn("[❌ WebHookSpy] Your executor is not supported :(.")
     return
 end
+
+local sentCache = {} -- prevent ratelimit by Caching the remote
 
 local function safeSerialize(val)
     local ok, result = pcall(function()
         return HttpService:JSONEncode(val)
     end)
-    if ok then
-        return result
-    else
-        return "\"[unserializable: " .. typeof(val) .. "]\""
-    end
+    return ok and result or "\"[unserializable: " .. typeof(val) .. "]\""
 end
 
 local function serializeArgs(args)
@@ -48,8 +45,11 @@ local function serializeArgs(args)
 end
 
 local function buildCodeSnippet(remote, method, args)
-    local argsJoined = table.concat(serializeArgs(args), ", ")
-    return "game." .. remote:GetFullName() .. ":" .. method .. "(" .. argsJoined .. ")"
+    return "game." .. remote:GetFullName() .. ":" .. method .. "(" .. table.concat(serializeArgs(args), ", ") .. ")"
+end
+
+local function makeKey(remote, method, args)
+    return remote:GetFullName() .. method .. HttpService:JSONEncode(serializeArgs(args))
 end
 
 local hook
@@ -58,6 +58,10 @@ hook = hookmetamethod(game, "__namecall", newcclosure(function(Self, ...)
     if not checkcaller() then
         local method = getnamecallmethod()
         if (method == "FireServer" or method == "InvokeServer") and typeof(Self) == "Instance" then
+            local key = makeKey(Self, method, Args)
+            if sentCache[key] then return hook(Self, ...) end
+            sentCache[key] = true
+
             local codeSnippet = buildCodeSnippet(Self, method, Args)
 
             local payload = {
@@ -83,8 +87,7 @@ hook = hookmetamethod(game, "__namecall", newcclosure(function(Self, ...)
             })
         end
     end
-
     return hook(Self, ...)
 end))
 
-print("[✅ Remote Spy Enabled]")
+print("[✅ Webhook Spy Enabled]")
